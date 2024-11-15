@@ -679,6 +679,7 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         with self._profiler as prof:
             # self.epochs_run should be non-zero when we're resuming from a checkpoint
             for curr_epoch in range(self.epochs_run, self.total_epochs):
+                # TRAINING LOOP
                 # Update the sampler to ensure data is correctly shuffled across epochs
                 # in case shuffle is True
                 self._sampler.set_epoch(curr_epoch)
@@ -761,6 +762,58 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
                         running_loss = 0
                         num_tokens = 0
                         t0 = time.perf_counter()
+
+                    # Stop tracking CUDA memory now that active steps are complete
+                    if (
+                        curr_epoch == 0
+                        and self.profiler_profile_memory
+                        and idx
+                        == self.profiler_wait_steps
+                        + self.profiler_warmup_steps
+                        + self.profiler_active_steps
+                    ):
+                        torch.cuda.memory._record_memory_history(enabled=None)
+
+                    # Step the profiler
+                    # Note we are stepping each batch, which might not include optimizer step in the trace
+                    # if the schedule cycle doesn't align with gradient accumulation.
+                    prof.step()
+
+                # VALIDATION LOOP
+                self._sampler_val.set_epoch(curr_epoch)
+
+                pbar = tqdm(total=len(self._dataloader_val))
+                for idx, batch in enumerate(self.self._dataloader_val):
+                    # Start tracking CUDA memory for active steps for just the first epoch
+                    if (
+                        curr_epoch == 0
+                        and self.profiler_profile_memory
+                        and idx == self.profiler_wait_steps + self.profiler_warmup_steps
+                    ):
+                        torch.cuda.memory._record_memory_history()
+
+                    utils.batch_to_device(batch, self._device)
+
+                    # Loss is normalized by default so we multiply by the number of tokens
+                    # This way we can normalize by the total number of tokens if we're accumulating gradients
+                    current_loss = self._loss_step(batch)
+                    
+                    time_per_step = time.perf_counter() - t0
+                    log_dict = {
+                        "val_loss": current_loss.item(),
+                        "tokens_per_second_per_gpu": num_tokens / time_per_step,
+                    }
+                    if (
+                        self._device.type == "cuda"
+                        and self._log_peak_memory_stats
+                    ):
+                        log_dict.update(
+                            training.get_memory_stats(device=self._device)
+                        )
+                    self._metric_logger.log_dict(
+                        log_dict,
+                        step=self.global_step,
+                    )
 
                     # Stop tracking CUDA memory now that active steps are complete
                     if (
