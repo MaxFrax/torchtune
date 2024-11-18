@@ -779,58 +779,6 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
                     # if the schedule cycle doesn't align with gradient accumulation.
                     prof.step()
 
-                # VALIDATION LOOP
-                self._sampler_val.set_epoch(curr_epoch)
-
-                pbar = tqdm(total=len(self._dataloader_val))
-                for idx, batch in enumerate(self.self._dataloader_val):
-                    # Start tracking CUDA memory for active steps for just the first epoch
-                    if (
-                        curr_epoch == 0
-                        and self.profiler_profile_memory
-                        and idx == self.profiler_wait_steps + self.profiler_warmup_steps
-                    ):
-                        torch.cuda.memory._record_memory_history()
-
-                    utils.batch_to_device(batch, self._device)
-
-                    # Loss is normalized by default so we multiply by the number of tokens
-                    # This way we can normalize by the total number of tokens if we're accumulating gradients
-                    current_loss = self._loss_step(batch)
-                    
-                    time_per_step = time.perf_counter() - t0
-                    log_dict = {
-                        "val_loss": current_loss.item(),
-                        "tokens_per_second_per_gpu": num_tokens / time_per_step,
-                    }
-                    if (
-                        self._device.type == "cuda"
-                        and self._log_peak_memory_stats
-                    ):
-                        log_dict.update(
-                            training.get_memory_stats(device=self._device)
-                        )
-                    self._metric_logger.log_dict(
-                        log_dict,
-                        step=self.global_step,
-                    )
-
-                    # Stop tracking CUDA memory now that active steps are complete
-                    if (
-                        curr_epoch == 0
-                        and self.profiler_profile_memory
-                        and idx
-                        == self.profiler_wait_steps
-                        + self.profiler_warmup_steps
-                        + self.profiler_active_steps
-                    ):
-                        torch.cuda.memory._record_memory_history(enabled=None)
-
-                    # Step the profiler
-                    # Note we are stepping each batch, which might not include optimizer step in the trace
-                    # if the schedule cycle doesn't align with gradient accumulation.
-                    prof.step()
-
                 self.epochs_run += 1
                 start_save_checkpoint = time.perf_counter()
                 log.info("Starting checkpoint save...")
@@ -839,6 +787,40 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
                     "Checkpoint saved in {:.2f} seconds.".format(
                         time.perf_counter() - start_save_checkpoint
                     )
+                )
+
+                # VALIDATION LOOP
+                self._sampler_val.set_epoch(curr_epoch)
+
+                validation_steps = min(len(self._dataloader_val), self.max_steps_per_epoch)
+                pbar = tqdm(total=validation_steps)
+                val_losses = []
+                for idx, batch in enumerate(self.self._dataloader_val):
+                    if (
+                        self.max_steps_per_epoch is not None
+                        and idx == self.max_steps_per_epoch
+                    ):
+                        break
+
+                    utils.batch_to_device(batch, self._device)
+
+                    current_loss = self._loss_step(batch)
+                    val_losses.append(current_loss.item())
+
+                    log_dict = {
+                        "val_loss": current_loss.item(),
+                    }
+                    self._metric_logger.log_dict(
+                        log_dict,
+                        step=self.global_step,
+                    )
+
+                self._metric_logger.log_dict(
+                    {
+                        "avg_val_loss": sum(val_losses) / len(val_losses),
+                        "epoch": curr_epoch,
+                    },
+                    step=self.global_step,
                 )
 
     def cleanup(self) -> None:
