@@ -795,7 +795,7 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
                 validation_steps = min(len(self._dataloader_val), self.max_steps_per_epoch)
                 pbar = tqdm(total=validation_steps)
                 val_losses = []
-                for idx, batch in enumerate(self.self._dataloader_val):
+                for idx, batch in enumerate(self._dataloader_val):
                     if (
                         self.max_steps_per_epoch is not None
                         and idx == self.max_steps_per_epoch
@@ -806,6 +806,11 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
 
                     current_loss = self._loss_step(batch)
                     val_losses.append(current_loss.item())
+
+                    pbar.update(1)
+                    pbar.set_description(
+                        f"{curr_epoch + 1}|{idx}|Loss: {current_loss.item()}"
+                    )
 
                     log_dict = {
                         "val_loss": current_loss.item(),
