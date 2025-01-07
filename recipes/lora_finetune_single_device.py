@@ -791,16 +791,9 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
                 # VALIDATION LOOP
                 self._sampler_val.set_epoch(curr_epoch)
 
-                validation_steps = min(len(self._dataloader_val), self.max_steps_per_epoch)
-                pbar = tqdm(total=validation_steps)
+                pbar = tqdm(total=len(self._dataloader_val))
                 val_losses = []
                 for idx, batch in enumerate(self._dataloader_val):
-                    if (
-                        self.max_steps_per_epoch is not None
-                        and idx == self.max_steps_per_epoch
-                    ):
-                        break
-
                     utils.batch_to_device(batch, self._device)
 
                     current_loss = self._loss_step(batch)
