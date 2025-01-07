@@ -310,7 +310,7 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
             collate_fn=collate_name,
         )
 
-        if 'dataset_validation' in cfg:
+        if "dataset_validation" in cfg:
             self._sampler_val, self._dataloader_val = self._setup_data(
                 cfg_dataset=cfg.dataset_validation,
                 shuffle=cfg.shuffle,
