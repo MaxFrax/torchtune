@@ -809,13 +809,13 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
                     }
                     self._metric_logger.log_dict(
                         log_dict,
-                        step=self.global_step,
+                        step=(curr_epoch + 1) * idx,
                     )
 
                 self._metric_logger.log_dict(
                     {
                         "avg_val_loss": sum(val_losses) / len(val_losses),
-                        "epoch": curr_epoch,
+                        "epoch": curr_epoch + 1,
                     },
                     step=self.global_step,
                 )
